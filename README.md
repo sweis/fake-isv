@@ -5,10 +5,13 @@ This is simple fake ISV that handles AppDirect events. It always returns a succe
 URL with the account identifier "fake".
 
 The log of the last 10 events is visible at:
-fake-isv.appspot.com
+* http://fake-isv.appspot.com
 
 These events are posted to:
-fake-isv.appspot.com/events?token={token}[&returnUrl={returnUrl}]
+* http://fake-isv.appspot.com/event?token={token}[&returnUrl={returnUrl}]
+
+For example:
+* http://fake-isv.appspot.com/event?token=dummyChange
 
 Users assigned or unassigned are visible at:
-fake-isv.appspot.com/users
+* http://fake-isv.appspot.com/users
