@@ -1,0 +1,24 @@
+<html>
+  <body>
+    <h3>List of last 10 received events</h3>
+    {% for event in events %}
+      <hr/>
+      Event Date: <b>{{ event.date }}</b><br/>
+        {% if event.token %}
+          Token: <b>{{ event.token }}</b><br/>
+        {% endif %}
+        {% if event.url %}
+          <a href="{{event.url}}&success=true&accountIdentifier=fake">Return URL</a><br/>
+        {% endif %}
+	{% if event.status %}
+          Response status: {{ event.status }}<br/>
+        {% endif %}
+        {% if event.result %}
+	  <pre>
+	  {{ event.result }}
+	  </pre>
+	{% endif %}
+    {% endfor %}
+   <div><a href="users.html">User list</a></div>
+  </body>
+</html>
