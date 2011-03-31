@@ -4,14 +4,18 @@ import cgi
 import logging
 import oauth2
 
+from google.appengine.dist import use_library
+use_library('django', '1.2')
+
 from models import Event
 from models import CompanySubscription
 from models import User
 
+from marshall import EventXml
+
 from google.appengine.api.datastore_errors import BadArgumentError
 from xml.dom import minidom
 
-# These credentials are just local. Okay to check into Git.
 consumer_key = 'fake-python-isv-307'
 consumer_secret = 'hSZr5yppYjHUYOuS'
 eventUrlTemplate = "http://localhost:8080/AppDirect/rest/api/events/%s";
@@ -26,7 +30,7 @@ errorTemplate = """
 
 successMessage = """<result><success>true</success></result>"""
 
-def EventFetch(token):
+def FetchEvent(token):
     consumer = oauth2.Consumer(consumer_key, consumer_secret)
     client = oauth2.Client(consumer)
     eventUrl = eventUrlTemplate % token
@@ -34,67 +38,37 @@ def EventFetch(token):
     event = Event()
     event.token = token
     event.status = int(resp['status'])
+
     if event.status == 200:
         xmlDocument = minidom.parseString(content)
+        eventXml = EventXml(xmlDocument)
         event.result = cgi.escape(xmlDocument.toprettyxml())
         event.put()
-        return ParseEvent(xmlDocument)
+        return HandleEvent(eventXml)
     else:
         message = "HTTP response %d" % event.status
         logging.error(message)
         event.put()
         return errorTemplate % ( "UNKNOWN_ERROR", message)
 
-def ParseEvent(xmlDocument):
-    eventType = \
-        xmlDocument.getElementsByTagName('type')[0].childNodes[0].data
-    logging.info("Recevied event type %s" % eventType)
-    if eventType == "SUBSCRIPTION_ORDER":
-        return CreateOrder(xmlDocument)
-    elif eventType == "SUBSCRIPTION_CHANGE":
-        return ChangeOrder(xmlDocument)
-    elif eventType == "SUBSCRIPTION_CANCEL":
-        return CancelOrder(xmlDocument)
-    elif eventType == "USER_ASSIGNMENT":
-        return AssignUser(xmlDocument)
-    elif eventType == "USER_UNASSIGNMENT":
-        return UnassignUser(xmlDocument)
+def HandleEvent(eventXml):    
+    logging.info("Recevied event type %s" % eventXml.eventType)
+    if eventXml.eventType == "SUBSCRIPTION_ORDER":
+        return CreateOrder(eventXml)
+    elif eventXml.eventType == "SUBSCRIPTION_CHANGE":
+        return ChangeOrder(eventXml)
+    elif eventXml.eventType == "SUBSCRIPTION_CANCEL":
+        return CancelOrder(eventXml)
+    elif eventXml.eventType == "USER_ASSIGNMENT":
+        return AssignUser(eventXml)
+    elif eventXml.eventType == "USER_UNASSIGNMENT":
+        return UnassignUser(eventXml)
     else:
-        message = "Event type %s is not configured" % eventType
+        message = "Event type %s is not configured" % eventXml.eventType
         return errorTemplate % ( "CONFIGURATION_ERROR", message)
     return successMessage
 
-# XML Parsing utility methods
-
-def GetEvent(xmlDocument):
-    return xmlDocument.getElementsByTagName('event')[0]
-
-def GetPayload(xmlDocument):
-    return GetEvent(xmlDocument).getElementsByTagName('payload')[0]
-
-def GetAccountIdentifier(payload):
-    account = payload.getElementsByTagName('account')[0]
-    accountIdentifier = payload.getElementsByTagName('accountIdentifier')[0]\
-        .childNodes[0].data
-    return accountIdentifier
-
-def GetUserField(userXml, field):
-    return userXml.getElementsByTagName(field)[0].childNodes[0].data
-
-# Datatstore utility method
-
-def CreateUser(userXml, companySubscription):
-    first = GetUserField(userXml, 'firstName')
-    last = GetUserField(userXml, 'lastName')
-    email = GetUserField(userXml, 'email')
-    openid = GetUserField(userXml, 'openId')
-    user = User.get_or_insert(openid)
-    user.email = email
-    user.openid = openid
-    user.first = first
-    user.last = last
-    user.subscription = companySubscription
-    return user
+# Datatstore utility methods
 
 def GetSubscription(accountIdentifier):
     subscription = None
@@ -116,54 +90,36 @@ def GetUsers(subscription, openid = None):
 
 # Event handling methods
 
-def CreateOrder(xmlDocument):
-    event = GetEvent(xmlDocument)
-    payload = GetPayload(xmlDocument)
-    # Parse company info fields
-    companyXml = payload.getElementsByTagName('company')[0]
-    name = companyXml.getElementsByTagName('name')[0].childNodes[0].data
-    website = companyXml.getElementsByTagName('website')[0].childNodes[0].data
-    order = payload.getElementsByTagName('order')[0]
-    # Parse order info
-    edition = order.getElementsByTagName('editionCode')[0].childNodes[0].data
-    logging.info("Read %s %s %s" % (name, website, edition))
-    companySubscription = CompanySubscription()
-    companySubscription.edition = edition
-    companySubscription.name = name
-    companySubscription.website = website
-
-    # Parse creator info
+def CreateOrder(eventXml):
+    logging.info("Read %s %s %s" % (eventXml.payload.company.name,\
+                                        eventXml.payload.company.website,\
+                                        eventXml.payload.order.edition))
+    companySubscription = eventXml.payload.CreateSubscription()
     companySubscription.put()
-    creatorXml = event.getElementsByTagName('creator')[0]
-    user = CreateUser(creatorXml, companySubscription)
-    user.put()
+    creator = eventXml.creator.CreateUserModel(companySubscription)
+    creator.put()
     return "<result><success>true</success><accountIdentifier>%s</accountIdentifier></result>" % companySubscription.key().id()
 
-def ChangeOrder(xmlDocument):
-    payload = GetPayload(xmlDocument)
-    accountIdentifier = GetAccountIdentifier(payload)
-    subscription = GetSubscription(accountIdentifier)
+def ChangeOrder(eventXml):
+    accountId = eventXml.payload.account.accountIdentifier
+    subscription = GetSubscription(accountId)
 
     if subscription == None:
         message = "Account %s not found" % accountIdentifier
         logging.error(message)
         return errorTemplate % ("ACCOUNT_NOT_FOUND", message)
 
-    order = payload.getElementsByTagName('order')[0]
-    # Parse order info
-    edition = order.getElementsByTagName('editionCode')[0].childNodes[0].data
     # Update the edition code
-    subscription.edition = edition
+    subscription.edition = eventXml.payload.order.edition
     subscription.put()
     return successMessage
 
-def CancelOrder(xmlDocument):
-    payload = GetPayload(xmlDocument)
-    accountIdentifier = GetAccountIdentifier(payload)
-    subscription = GetSubscription(accountIdentifier)
+def CancelOrder(eventXml):
+    accountId = eventXml.payload.account.accountIdentifier
+    subscription = GetSubscription(accountId)
 
     if subscription == None:
-        message = "Account %s not found" % accountIdentifier
+        message = "Account %s not found" % accountId
         logging.error(message)
         return errorTemplate % ("ACCOUNT_NOT_FOUND", message)
 
@@ -175,39 +131,34 @@ def CancelOrder(xmlDocument):
     subscription.delete()
     return successMessage
 
-def AssignUser(xmlDocument):
-    payload = GetPayload(xmlDocument)
-    accountIdentifier = GetAccountIdentifier(payload)
-    subscription = GetSubscription(accountIdentifier)
+def AssignUser(eventXml):
+    accountId = eventXml.payload.account.accountIdentifier
+    subscription = GetSubscription(accountId)
     if subscription == None:
         message = "Account %s not found" % accountIdentifier
         logging.error(message)
         return errorTemplate % ("ACCOUNT_NOT_FOUND", message)
 
-    userXml = payload.getElementsByTagName('user')[0]
-    user = CreateUser(userXml, subscription)
-    logging.info("Assigning user %s to account %s" % \
-                     (user.email, accountIdentifier))
+    user = eventXml.payload.user.CreateUserModel(subscription)
+    logging.info("Assigning user %s to account %s" % (user.email, accountId))
     user.put()
     return successMessage
 
-def UnassignUser(xmlDocument):
-    payload = GetPayload(xmlDocument)
-    accountIdentifier = GetAccountIdentifier(payload)
-    subscription = GetSubscription(accountIdentifier)
+def UnassignUser(eventXml):
+    accountId = eventXml.payload.account.accountIdentifier
+    subscription = GetSubscription(accountId)
     if subscription == None:
         message = "Account %s not found" % accountIdentifier
         logging.error(message)
         return errorTemplate % ("ACCOUNT_NOT_FOUND", message)
 
-    userXml = payload.getElementsByTagName('user')[0]
-    openid = GetUserField(userXml, 'openId')
+    openid = eventXml.payload.user.openid
     users = GetUsers(subscription, openid)
     if users.count() == 0:
         logging.error("User not found: %s" % openid)
         return errorTemplate % ("USER_NOT_FOUND", openid)
     user = users.get()
-    logging.info("Unassigning user %s from account %s" % \
-                     (user.email, accountIdentifier))
+    logging.info("Unassigning user %s from account %s" %\
+                     (user.email, accountId))
     user.delete()
     return successMessage

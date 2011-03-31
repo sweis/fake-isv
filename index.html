@@ -1,24 +1,18 @@
 <html>
   <body>
-    <h3>List of last 10 received events</h3>
-    {% for event in events %}
-      <hr/>
-      Event Date: <b>{{ event.date }}</b><br/>
-        {% if event.token %}
-          Token: <b>{{ event.token }}</b><br/>
-        {% endif %}
-        {% if event.url %}
-          <a href="{{event.url}}&success=true&accountIdentifier=fake">Return URL</a><br/>
-        {% endif %}
-	{% if event.status %}
-          Response status: {{ event.status }}<br/>
-        {% endif %}
-        {% if event.result %}
-	  <pre>
-	  {{ event.result }}
-	  </pre>
-	{% endif %}
+    <h3>Current Subscriptions</h3>
+    <ul>
+    {% for subscription in subscriptions %}
+      <li>{{ subscription.name}}, {{ subscription.edition }}</li>
     {% endfor %}
-   <div><a href="users.html">User list</a></div>
+    </ul>
+
+    <h3>Current Users</h3>
+    <ul>
+    {% for user in users %}
+      <li>{{ user.email }}, {{ user.subscription.name }}</li>
+    {% endfor %}
+    </ul>
+    <div><a href="{{ logoutUrl }}">Logout</a></div>
   </body>
 </html>

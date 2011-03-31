@@ -4,5 +4,16 @@ runtime: python
 api_version: 1
 
 handlers:
-- url: .*
+- url: /_ah/login_required
+  script: openid_login.py
+
+- url: /(.*\.(xml))
+  static_files: static/\1
+  upload: static/(.*\.(xml))
+
+- url: /event
   script: main.py
+
+- url: /
+  script: main.py
+  login: required
